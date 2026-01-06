@@ -14,6 +14,14 @@ export interface SimulationState {
   ambulanceLane: number | null;
 }
 
+export interface SimulationMetrics {
+  step: number;
+  avgWait: number;
+  throughput: number;
+  collision: boolean;
+  totalMass: number;
+}
+
 export enum TrafficPhase {
   NORTH_SOUTH = 0,
   EAST_WEST = 1
