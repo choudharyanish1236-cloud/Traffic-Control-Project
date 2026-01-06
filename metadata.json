@@ -1,0 +1,5 @@
+{
+  "name": "Traffic-RL Explorer",
+  "description": "An interactive dashboard visualizing a Reinforcement Learning-based traffic signal controller for a 4-way intersection, including the full Python project codebase for implementation.",
+  "requestFramePermissions": []
+}
