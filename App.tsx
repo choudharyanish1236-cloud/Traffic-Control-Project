@@ -39,9 +39,9 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'sim' | 'code' | 'stats'>('sim');
   const [selectedFile, setSelectedFile] = useState(PYTHON_CODEBASE[0]);
   const [isTraining, setIsTraining] = useState(false);
-  const [trainingData, setTrainingData] = useState<{episode: number, wait: number}[]>([]);
+  const [trainingData, setTrainingData] = useState<{episode: number, wait: number, reward: number}[]>([]);
   
-  // Real-time metrics from the simulation
+  // Real-time metrics from the current simulation run
   const [realTimeMetrics, setRealTimeMetrics] = useState<SimulationMetrics[]>([]);
   const [cumulativeStats, setCumulativeStats] = useState({
     totalThroughput: 0,
@@ -63,24 +63,28 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  // Mock training simulation
-  const startTraining = () => {
-    setIsTraining(true);
-    setTrainingData([]);
-    let episode = 0;
-    const interval = setInterval(() => {
-      setTrainingData(prev => [
-        ...prev, 
-        { 
-          episode: episode++, 
-          wait: 50 * Math.exp(-episode / 30) + Math.random() * 5 + 10 
-        }
-      ]);
-      if (episode > 100) {
-        clearInterval(interval);
-        setIsTraining(false);
+  const handleEpisodeComplete = useCallback((finalStats: { avgWait: number, totalReward: number }) => {
+    setTrainingData(prev => [
+      ...prev,
+      {
+        episode: prev.length,
+        wait: finalStats.avgWait,
+        reward: finalStats.totalReward
       }
-    }, 50);
+    ]);
+    
+    // In "Training" mode, we might want to stop after a certain number of real episodes
+    if (trainingData.length >= 49) { // 50 episodes total
+      setIsTraining(false);
+    }
+  }, [trainingData.length]);
+
+  const startTraining = () => {
+    // Clear previous history if starting fresh
+    setTrainingData([]);
+    setCumulativeStats({ totalThroughput: 0, collisions: 0, peakWait: 0 });
+    setIsTraining(true);
+    setActiveTab('sim'); // Switch to simulation view to see it happen
   };
 
   const currentWait = realTimeMetrics.length > 0 ? realTimeMetrics[realTimeMetrics.length - 1].avgWait : 0;
@@ -126,8 +130,10 @@ const App: React.FC = () => {
         <div className="p-4 border-t border-slate-800">
           <div className="hidden md:block">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-xs font-medium uppercase tracking-wider text-slate-200">Simulation Stream: ON</span>
+              <div className={`w-2 h-2 rounded-full ${isTraining ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`}></div>
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-200">
+                {isTraining ? 'Training Active' : 'Simulation Stream: ON'}
+              </span>
             </div>
             <p className="text-[10px] text-slate-500 font-mono">WS://LOCAL_ENV:8080</p>
           </div>
@@ -140,12 +146,12 @@ const App: React.FC = () => {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
           <div className="flex flex-col">
             <h2 className="text-lg font-bold text-slate-800 leading-tight">
-              {activeTab === 'sim' && 'Environment Visualization'}
+              {activeTab === 'sim' && (isTraining ? 'Live Training Cycle' : 'Environment Visualization')}
               {activeTab === 'code' && 'Project Repository: traffic-rl'}
               {activeTab === 'stats' && 'RL Performance Metrics'}
             </h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {activeTab === 'stats' ? 'Real-time Telemetry Active' : 'Neural Network Controller v1.0.4'}
+              {isTraining ? `Episode ${trainingData.length + 1} In Progress` : 'Neural Network Controller v1.0.4'}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -155,14 +161,20 @@ const App: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2 rounded-md font-bold text-xs uppercase tracking-widest transition-all ${isTraining ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-slate-900 text-white hover:bg-slate-800 active:scale-95 shadow-lg shadow-slate-200'}`}
             >
               <Zap size={14} className={isTraining ? '' : 'fill-amber-400 text-amber-400'} />
-              {isTraining ? 'Training...' : 'Recalibrate Agent'}
+              {isTraining ? 'Training Underway...' : 'Start Training Loop'}
             </button>
           </div>
         </header>
 
         {/* Content Area */}
         <main className="flex-1 overflow-auto p-6 bg-slate-50/50">
-          {activeTab === 'sim' && <SimulationDashboard onStep={handleSimStep} />}
+          {activeTab === 'sim' && (
+            <SimulationDashboard 
+              onStep={handleSimStep} 
+              onEpisodeComplete={handleEpisodeComplete}
+              isTrainingMode={isTraining}
+            />
+          )}
           
           {activeTab === 'code' && (
             <div className="h-full flex gap-6">
@@ -203,13 +215,13 @@ const App: React.FC = () => {
                 <StatCard 
                   title="Catastrophic Failures" 
                   value={`${cumulativeStats.collisions}`} 
-                  sub="Collision Count"
+                  sub="Total Simulation Crashing"
                   icon={<ShieldAlert size={18} className="text-red-500" />}
                 />
                 <StatCard 
-                  title="Flow Rate" 
-                  value={`${currentThroughput.toFixed(1)}`} 
-                  sub="Current Throughput"
+                  title="Training Episodes" 
+                  value={`${trainingData.length}`} 
+                  sub="Completed Cycles"
                   icon={<Zap size={18} className="text-emerald-500" />}
                 />
               </div>
@@ -217,8 +229,8 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-800">Live Wait Time Dynamics</h3>
-                    <div className="px-2 py-1 bg-blue-50 text-[10px] font-bold text-blue-600 rounded">UPDATES 30Hz</div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-800">Live Step Latency</h3>
+                    <div className="px-2 py-1 bg-blue-50 text-[10px] font-bold text-blue-600 rounded">TELEMETRY</div>
                   </div>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -251,25 +263,27 @@ const App: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-800">Throughput Mass Flow</h3>
-                    <div className="px-2 py-1 bg-emerald-50 text-[10px] font-bold text-emerald-600 rounded">DYNAMIC FLOW</div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-800">Historical Convergence (Avg Wait)</h3>
+                    <div className="px-2 py-1 bg-emerald-50 text-[10px] font-bold text-emerald-600 rounded">LEARNING CURVE</div>
                   </div>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={realTimeMetrics.slice(-20)}>
+                      <LineChart data={trainingData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="step" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="episode" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                         <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                         <Tooltip 
                           contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                         />
-                        <Bar 
-                          dataKey="throughput" 
-                          fill="#10b981" 
-                          radius={[4, 4, 0, 0]}
-                          isAnimationActive={false}
+                        <Line 
+                          type="monotone" 
+                          dataKey="wait" 
+                          stroke="#10b981" 
+                          strokeWidth={3}
+                          dot={{ r: 4, fill: '#10b981' }}
+                          activeDot={{ r: 6 }}
                         />
-                      </BarChart>
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
@@ -278,23 +292,23 @@ const App: React.FC = () => {
               <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden">
                 <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
                   <div className="flex-1">
-                    <h3 className="text-white text-xl font-black mb-2 uppercase tracking-tighter">Optimization Training Progress</h3>
-                    <p className="text-slate-400 text-sm mb-6">Convergence behavior of the Deep Q-Network over historical training episodes. Lower wait time indicates successful policy learning.</p>
+                    <h3 className="text-white text-xl font-black mb-2 uppercase tracking-tighter">Reward Maximization Progress</h3>
+                    <p className="text-slate-400 text-sm mb-6">Aggregate performance scores across historical episodes. Higher values indicate more efficient traffic flow and priority clearing.</p>
                     <div className="flex gap-4">
                       <div className="bg-white/5 px-4 py-3 rounded-xl border border-white/10">
-                        <span className="text-slate-500 text-[10px] font-black uppercase block mb-1">Total Episodes</span>
+                        <span className="text-slate-500 text-[10px] font-black uppercase block mb-1">Total Data Points</span>
                         <span className="text-white font-mono font-bold">{trainingData.length}</span>
                       </div>
                       <div className="bg-white/5 px-4 py-3 rounded-xl border border-white/10">
-                        <span className="text-slate-500 text-[10px] font-black uppercase block mb-1">Convergence</span>
-                        <span className="text-emerald-400 font-mono font-bold">ALPHA_READY</span>
+                        <span className="text-slate-500 text-[10px] font-black uppercase block mb-1">Policy State</span>
+                        <span className="text-emerald-400 font-mono font-bold">{isTraining ? 'REFINING' : 'STABLE'}</span>
                       </div>
                     </div>
                   </div>
                   <div className="w-full md:w-[400px] h-[150px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={trainingData}>
-                        <Line type="monotone" dataKey="wait" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="reward" stroke="#3b82f6" strokeWidth={2} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>

@@ -18,19 +18,29 @@ interface EnhancedSimulationState extends SimulationState {
   intersectionOccupancy: number;
   occupancyPhase: number;
   hasCollision: boolean;
+  totalEpisodeReward: number;
 }
 
 interface SimulationDashboardProps {
   onStep?: (metrics: SimulationMetrics) => void;
+  onEpisodeComplete?: (stats: { avgWait: number, totalReward: number }) => void;
+  isTrainingMode?: boolean;
 }
 
-const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => {
+const MAX_EPISODE_STEPS = 150;
+
+const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ 
+  onStep, 
+  onEpisodeComplete,
+  isTrainingMode = false
+}) => {
   const [simState, setSimState] = useState<EnhancedSimulationState>({
     lanes: Array(4).fill({ cars: 0, waitTime: 0, arrivals: 0 }),
     laneVehicles: [[], [], [], []],
     phase: TrafficPhase.NORTH_SOUTH,
     step: 0,
     totalReward: 0,
+    totalEpisodeReward: 0,
     avgWait: 0,
     ambulanceLane: null,
     minPhaseSteps: 12,
@@ -47,10 +57,60 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
 
   const isSwitchLocked = simState.currentPhaseSteps < simState.minPhaseSteps;
 
+  const handleReset = useCallback(() => {
+    setSimState({
+      lanes: Array(4).fill({ cars: 0, waitTime: 0, arrivals: 0 }),
+      laneVehicles: [[], [], [], []],
+      phase: TrafficPhase.NORTH_SOUTH,
+      step: 0,
+      totalReward: 0,
+      totalEpisodeReward: 0,
+      avgWait: 0,
+      ambulanceLane: null,
+      minPhaseSteps: 12,
+      currentPhaseSteps: 0,
+      intersectionOccupancy: 0,
+      occupancyPhase: -1,
+      hasCollision: false
+    });
+  }, []);
+
   const updateSim = useCallback(() => {
     if (simState.hasCollision) return;
 
     setSimState(prev => {
+      // Check for episode completion
+      const isDone = prev.step >= MAX_EPISODE_STEPS;
+      
+      if (isDone || prev.hasCollision) {
+        if (onEpisodeComplete) {
+          onEpisodeComplete({
+            avgWait: prev.avgWait,
+            totalReward: prev.totalEpisodeReward
+          });
+        }
+        
+        if (isTrainingMode) {
+          // Auto reset for training
+          return {
+            lanes: Array(4).fill({ cars: 0, waitTime: 0, arrivals: 0 }),
+            laneVehicles: [[], [], [], []],
+            phase: TrafficPhase.NORTH_SOUTH,
+            step: 0,
+            totalReward: 0,
+            totalEpisodeReward: 0,
+            avgWait: 0,
+            ambulanceLane: null,
+            minPhaseSteps: 12,
+            currentPhaseSteps: 0,
+            intersectionOccupancy: 0,
+            occupancyPhase: -1,
+            hasCollision: false
+          };
+        }
+        return prev;
+      }
+
       // 1. Stochastic Arrivals
       const newLaneVehicles = prev.laneVehicles.map((q, idx) => {
         const nextQ = [...q];
@@ -78,6 +138,7 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
         const nsWeight = newLaneVehicles[0].reduce((a, b) => a + b.weight, 0) + newLaneVehicles[1].reduce((a, b) => a + b.weight, 0);
         const ewWeight = newLaneVehicles[2].reduce((a, b) => a + b.weight, 0) + newLaneVehicles[3].reduce((a, b) => a + b.weight, 0);
         
+        // Simulating the agent choosing to switch
         if (prev.phase === TrafficPhase.NORTH_SOUTH && ewWeight > nsWeight + 8) {
           nextPhase = TrafficPhase.EAST_WEST;
           nextPhaseSteps = 0;
@@ -106,6 +167,7 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
       let nextOccupancy = Math.max(0, prev.intersectionOccupancy - 1);
       let nextOccupancyPhase = nextOccupancy === 0 ? -1 : prev.occupancyPhase;
       let stepThroughput = 0;
+      let stepReward = 0;
 
       const finalVehicles = newLaneVehicles.map((q, idx) => {
         let nextQ = q.map((v, i) => {
@@ -123,10 +185,12 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
           // Collision check
           if (nextOccupancy > 0 && nextOccupancyPhase !== nextPhase) {
             hasCollision = true;
+            stepReward -= 200; // Large penalty
           }
           const departed = nextQ.shift();
           if (departed) {
             stepThroughput += departed.weight;
+            stepReward += departed.weight * 5.0; // Positive reinforcement for throughput
             nextOccupancy = departed.type === 'truck' ? 6 : 3;
             nextOccupancyPhase = nextPhase;
           }
@@ -138,6 +202,9 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
       const totalStationaryWeight = finalVehicles.flat().reduce((acc, v) => acc + (v.speed < 0.1 ? v.weight : 0), 0);
       const totalVehicles = finalVehicles.flat().length;
       const currentAvgWait = totalVehicles > 0 ? totalStationaryWeight / totalVehicles : 0;
+      
+      // Wait penalty reinforcement
+      stepReward -= currentAvgWait * 0.5;
 
       // Report metrics back to parent
       if (onStep) {
@@ -161,41 +228,27 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
         ambulanceLane,
         intersectionOccupancy: nextOccupancy,
         occupancyPhase: nextOccupancyPhase,
-        hasCollision
+        hasCollision,
+        totalEpisodeReward: prev.totalEpisodeReward + stepReward
       };
     });
-  }, [policy, arrivalIntensity, isSwitchLocked, simState.hasCollision, onStep]);
+  }, [policy, arrivalIntensity, isSwitchLocked, simState.hasCollision, simState.step, onStep, onEpisodeComplete, isTrainingMode]);
 
   useEffect(() => {
     let interval: any;
-    if (isRunning && !simState.hasCollision) {
-      interval = setInterval(updateSim, 1000 / (speed * 3)); 
+    // When training, we force 5X speed to converge faster visually
+    const effectiveSpeed = isTrainingMode ? 5 : speed;
+    if (isRunning && (!simState.hasCollision || isTrainingMode)) {
+      interval = setInterval(updateSim, 1000 / (effectiveSpeed * 10)); 
     }
     return () => clearInterval(interval);
-  }, [isRunning, speed, updateSim, simState.hasCollision]);
-
-  const handleReset = () => {
-    setSimState({
-      lanes: Array(4).fill({ cars: 0, waitTime: 0, arrivals: 0 }),
-      laneVehicles: [[], [], [], []],
-      phase: TrafficPhase.NORTH_SOUTH,
-      step: 0,
-      totalReward: 0,
-      avgWait: 0,
-      ambulanceLane: null,
-      minPhaseSteps: 12,
-      currentPhaseSteps: 0,
-      intersectionOccupancy: 0,
-      occupancyPhase: -1,
-      hasCollision: false
-    });
-  };
+  }, [isRunning, speed, updateSim, simState.hasCollision, isTrainingMode]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
       <div className="lg:col-span-2 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl p-6 flex flex-col items-center justify-center relative overflow-hidden">
         {/* Collision Overlay */}
-        {simState.hasCollision && (
+        {simState.hasCollision && !isTrainingMode && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/80 backdrop-blur-lg animate-in fade-in duration-500">
              <Skull size={80} className="text-red-500 mb-4 animate-bounce" />
              <h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-2">System Failure</h3>
@@ -213,12 +266,18 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ onStep }) => 
         <div className="absolute top-4 left-4 flex flex-wrap gap-2 z-10">
           <div className="bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 border border-slate-700 shadow-xl text-slate-100">
             <Zap size={14} className="text-amber-400 fill-amber-400" />
-            <span className="text-xs font-black tracking-widest font-mono">SIM_T.{simState.step}</span>
+            <span className="text-xs font-black tracking-widest font-mono">SIM_T.{simState.step} / {MAX_EPISODE_STEPS}</span>
           </div>
           <div className={`px-4 py-2 rounded-full flex items-center gap-2 border shadow-xl transition-all duration-300 ${isSwitchLocked ? 'bg-amber-950/60 border-amber-800 text-amber-200' : 'bg-emerald-950/60 border-emerald-800 text-emerald-200'}`}>
             {isSwitchLocked ? <Lock size={14} className="animate-pulse" /> : <Unlock size={14} />}
             <span className="text-xs font-bold uppercase tracking-widest">{isSwitchLocked ? `LOCKED: ${simState.minPhaseSteps - simState.currentPhaseSteps}` : 'PHASE_RDY'}</span>
           </div>
+          {isTrainingMode && (
+            <div className="bg-blue-900/90 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 border border-blue-700 shadow-xl text-blue-100">
+              <FastForward size={14} className="animate-pulse" />
+              <span className="text-xs font-black tracking-widest font-mono uppercase">TRAINING_OPTIMIZATION</span>
+            </div>
+          )}
         </div>
 
         {/* 4-Way Intersection SVG */}

@@ -6,7 +6,76 @@ export const PYTHON_CODEBASE: PythonFile[] = [
     path: 'README.md',
     name: 'README.md',
     language: 'markdown',
-    content: `# traffic-rl\n\nSophisticated RL traffic signal controller with heterogeneous vehicle types, priority-based reward shaping, and speed-optimized flow.\n\n## Implementation Details\n- **Kinetic Observation**: State space includes real-time average speeds and lane-wise momentum (mass * speed).\n- **Momentum Reward**: Reward incorporates a 'momentum' term to encourage continuous flow.\n- **Action Masking**: Prevents illegal or unstable actions directly via the environment's info dictionary.\n- **Visualization**: Real-time rendering support using Matplotlib to see the agent's decisions in action.\n\n## Quick Run\n1. Install dependencies: \`pip install -r requirements.txt\`\n2. Run validation tests: \`pytest\`\n3. Train with visualization: \`python train.py --episodes 50 --render\`\n4. Evaluate with visualization: \`python evaluate.py --checkpoint models/dqn_checkpoint.pth --render\``
+    content: `# traffic-rl: Autonomous Traffic Signal Control via Deep Reinforcement Learning
+
+A high-fidelity simulation and training environment for optimizing 4-way intersection throughput using Deep Q-Networks (DQN).
+
+## Overview
+This project demonstrates an end-to-end Reinforcement Learning pipeline designed to manage complex urban traffic scenarios. The agent learns to minimize average vehicle wait times and maximize flow by observing the kinetic state of the intersection.
+
+## Key Features
+- **Heterogeneous Traffic**: Simulates Cars, Trucks, and Bikes with unique physical properties (mass, acceleration, length).
+- **Kinetic State Space**: 23-dimensional observation vector including lane-wise momentum and average speeds.
+- **Priority Handling**: Explicitly handles emergency vehicles (Ambulances) with weighted reward penalties for delays.
+- **Physics-Aware Reward**: Incorporates a "momentum" term to encourage continuous flow rather than stop-and-go behavior.
+- **Action Masking**: Implements strict phase duration constraints via an environment-level action mask.
+
+## Requirements
+To run this project, you need the following Python libraries installed:
+- **Python**: 3.8 or higher
+- **Core Dependencies**:
+  - \`torch\`: Neural network architecture and optimization.
+  - \`numpy\`: Numerical processing and environment logic.
+  - \`matplotlib\`: Real-time visualization and analytics plotting.
+  - \`pytest\`: Comprehensive unit testing for environment stability.
+
+## Setup Guidelines
+
+### 1. Environment Preparation
+It is highly recommended to use a virtual environment to manage dependencies:
+\`\`\`bash
+# Create a virtual environment
+python -m venv venv
+
+# Activate the environment
+# On macOS/Linux:
+source venv/bin/activate
+# On Windows:
+venv\\Scripts\\activate
+\`\`\`
+
+### 2. Installation
+Install the required packages using pip:
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+
+## Usage Guide
+
+### Training the Agent
+Train a new DQN policy from scratch. You can watch the training live by using the \`--render\` flag.
+\`\`\`bash
+python train.py --episodes 100 --render
+\`\`\`
+
+### Evaluating a Model
+Test the performance of a saved checkpoint (greedy policy):
+\`\`\`bash
+python evaluate.py --checkpoint models/dqn_checkpoint.pth --render
+\`\`\`
+
+### Running Tests
+Ensure the environment logic is sound by running the validation suite:
+\`\`\`bash
+pytest tests/test_env.py
+\`\`\`
+
+## Project Structure
+- \`envs/\`: Custom traffic simulation environment.
+- \`agents/\`: Implementation of the DQN agent (Network & Selection logic).
+- \`utils/\`: Visualization tools (Matplotlib renderer) and plotting utilities.
+- \`models/\`: Default directory for saved checkpoints.
+- \`tests/\`: Unit tests for environment verification.`
   },
   {
     path: 'requirements.txt',
