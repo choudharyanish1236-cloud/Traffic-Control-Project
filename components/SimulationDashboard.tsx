@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { TrafficPhase, SimulationState, LaneState, SimulationMetrics } from '../types';
-import { AlertTriangle, Clock, Car, Settings2, Info, Lock, Unlock, Truck, Bike, FastForward, Zap, Skull } from 'lucide-react';
+import { AlertTriangle, Clock, Car, Settings2, Info, Lock, Unlock, Truck, Bike, FastForward, Zap, Skull, RotateCcw } from 'lucide-react';
 
 interface Vehicle {
   type: 'car' | 'truck' | 'bike';
@@ -28,6 +28,29 @@ interface SimulationDashboardProps {
 }
 
 const MAX_EPISODE_STEPS = 150;
+
+const playCollisionSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sawtooth';
+    oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.6);
+
+    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.6);
+  } catch (e) {
+    console.warn("Audio Context could not be initialized", e);
+  }
+};
 
 const SimulationDashboard: React.FC<SimulationDashboardProps> = ({ 
   onStep, 
@@ -244,21 +267,37 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({
     return () => clearInterval(interval);
   }, [isRunning, speed, updateSim, simState.hasCollision, isTrainingMode]);
 
+  // Audio feedback for collision
+  useEffect(() => {
+    if (simState.hasCollision && !isTrainingMode) {
+      playCollisionSound();
+    }
+  }, [simState.hasCollision, isTrainingMode]);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-      <div className="lg:col-span-2 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl p-6 flex flex-col items-center justify-center relative overflow-hidden">
+      <div className={`lg:col-span-2 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl p-6 flex flex-col items-center justify-center relative overflow-hidden ${simState.hasCollision ? 'animate-shake border-red-900/50 shadow-red-900/20' : ''}`}>
         {/* Collision Overlay */}
         {simState.hasCollision && !isTrainingMode && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/80 backdrop-blur-lg animate-in fade-in duration-500">
              <Skull size={80} className="text-red-500 mb-4 animate-bounce" />
              <h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-2">System Failure</h3>
              <p className="text-red-200 text-lg font-bold mb-8 uppercase tracking-widest">Intersection Collision Detected</p>
-             <button 
-                onClick={handleReset}
-                className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-full shadow-2xl shadow-red-500/50 transition-all hover:scale-105 active:scale-95 uppercase tracking-widest"
-              >
-                Reset Environment
-              </button>
+             <div className="flex gap-4">
+               <button 
+                  onClick={handleReset}
+                  className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-full shadow-2xl shadow-red-500/50 transition-all hover:scale-105 active:scale-95 uppercase tracking-widest flex items-center gap-2"
+                >
+                  <RotateCcw size={18} />
+                  Retry Episode
+                </button>
+                <button 
+                  onClick={handleReset}
+                  className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-100 font-black rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 uppercase tracking-widest"
+                >
+                  Reset Environment
+                </button>
+             </div>
           </div>
         )}
 
@@ -282,7 +321,7 @@ const SimulationDashboard: React.FC<SimulationDashboardProps> = ({
 
         {/* 4-Way Intersection SVG */}
         <div className="relative w-full max-w-[620px] aspect-square">
-          <svg viewBox="0 0 500 500" className="w-full h-full">
+          <svg viewBox="0 0 500 500" className={`w-full h-full ${simState.hasCollision ? 'opacity-50' : ''}`}>
             <rect x="0" y="195" width="500" height="110" fill="#1e293b" />
             <rect x="195" y="0" width="110" height="500" fill="#1e293b" />
             <line x1="0" y1="250" x2="500" y2="250" stroke="#475569" strokeWidth="2" strokeDasharray="20 15" />
